@@ -46,7 +46,7 @@ variable "model_name" {
 
 # Configure the Azure Provider
 provider "azurerm" {
-  subscription_id = "29ea95b7-a4ce-45ba-89fe-abe1c08be1ee"
+  subscription_id = "b0dfd5b3-9f3c-4fb5-ae5e-0e7f81eab970"
   
   features {
     key_vault {
@@ -136,6 +136,16 @@ resource "azurerm_role_assignment" "key_vault_secrets_officer" {
   depends_on = [azurerm_key_vault.main]
 }
 
+# Add Key Vault Administrator role to the Terraform runner for full access
+# This includes both read and write permissions needed during plan/apply operations
+resource "azurerm_role_assignment" "key_vault_administrator" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Administrator"
+  principal_id         = data.azurerm_client_config.current.object_id
+
+  depends_on = [azurerm_key_vault.main]
+}
+
 # Resource Group
 resource "azurerm_resource_group" "main" {
   name     = azurecaf_name.resource_group.result
@@ -164,6 +174,7 @@ resource "azurerm_log_analytics_workspace" "main" {
   resource_group_name = azurerm_resource_group.main.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
+  local_authentication_enabled = true
 
   tags = {
     "azd-env-name" = var.environment_name
@@ -180,6 +191,9 @@ resource "azurerm_key_vault" "main" {
   soft_delete_retention_days  = 7
   purge_protection_enabled    = false
   sku_name                    = "standard"
+  
+  # Enable RBAC authorization instead of access policies
+  rbac_authorization_enabled = true
 
   tags = {
     "azd-env-name" = var.environment_name
@@ -364,7 +378,7 @@ resource "azurerm_storage_account" "main" {
 resource "azurerm_storage_container" "diagrams" {
   name                  = "diagrams"
   storage_account_id    = azurerm_storage_account.main.id
-  container_access_type = "blob"
+  container_access_type = "private"
 }
 
 # Grant Storage Blob Data Contributor to managed identity
@@ -435,8 +449,10 @@ resource "azurerm_key_vault_secret" "cosmos_key" {
   value        = azurerm_cosmosdb_account.main.primary_key
   key_vault_id = azurerm_key_vault.main.id
 
-  depends_on = [azurerm_role_assignment.key_vault_secrets_officer]
-
+  depends_on = [
+    azurerm_role_assignment.key_vault_secrets_officer,
+    azurerm_role_assignment.key_vault_administrator
+  ]
 }
 
 # Store storage account name and URL instead of connection string
@@ -445,15 +461,22 @@ resource "azurerm_key_vault_secret" "storage_account_name" {
   value        = azurerm_storage_account.main.name
   key_vault_id = azurerm_key_vault.main.id
 
-  depends_on = [azurerm_role_assignment.key_vault_secrets_officer]
+  depends_on = [
+    azurerm_role_assignment.key_vault_secrets_officer,
+    azurerm_role_assignment.key_vault_administrator
+  ]
 }
+
 
 resource "azurerm_key_vault_secret" "storage_account_url" {
   name         = "storage-account-url"
   value        = azurerm_storage_account.main.primary_blob_endpoint
   key_vault_id = azurerm_key_vault.main.id
 
-  depends_on = [azurerm_role_assignment.key_vault_secrets_officer]
+  depends_on = [
+    azurerm_role_assignment.key_vault_secrets_officer,
+    azurerm_role_assignment.key_vault_administrator
+  ]
 }
 
 # MCP Service Container App
